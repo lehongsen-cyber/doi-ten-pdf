@@ -1,11 +1,12 @@
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
+import io
 
 # --- Cấu hình trang web ---
 st.set_page_config(page_title="Đổi tên PDF - Tải Trực Tiếp", layout="centered")
 st.title("📂 Đổi tên PDF & Tải File Luôn")
-st.write("Xử lý xong file nào -> Hiện nút tải file đó.")
+st.write("Phiên bản sửa lỗi: Dùng Model Gemini Pro (Ổn định nhất)")
 
 # --- Nhập API Key ---
 with st.expander("🔑 Cài đặt API Key", expanded=True):
@@ -15,7 +16,10 @@ with st.expander("🔑 Cài đặt API Key", expanded=True):
 def get_new_filename(text_content, api_key):
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # --- SỬA LỖI TẠI ĐÂY ---
+        # Chuyển về 'gemini-pro' thay vì 'gemini-1.5-flash' để tránh lỗi 404
+        model = genai.GenerativeModel('gemini-pro') 
         
         prompt = f"""
         Nhiệm vụ: Đặt tên file ngắn gọn cho văn bản sau.
@@ -50,12 +54,11 @@ if api_key:
         for i, uploaded_file in enumerate(uploaded_files):
             original_name = uploaded_file.name
             
-            # Tạo container cho từng file để nhìn cho gọn
+            # Khung hiển thị từng file
             with st.container():
                 st.info(f"Đang đọc file: {original_name}...")
                 
                 try:
-                    # Đọc PDF
                     reader = PdfReader(uploaded_file)
                     text = ""
                     if len(reader.pages) > 0:
@@ -70,24 +73,22 @@ if api_key:
                     if error_msg:
                         st.error(f"❌ Lỗi: {error_msg}")
                     else:
-                        st.success(f"✅ Đã đổi tên thành: **{new_name}**")
+                        st.success(f"✅ Đổi tên xong: **{new_name}**")
                         
-                        # --- NÚT TẢI PDF TRỰC TIẾP ---
-                        # Đưa con trỏ file về đầu để đọc lại nội dung
-                        uploaded_file.seek(0)
-                        
+                        # --- NÚT TẢI PDF RIÊNG LẺ ---
+                        uploaded_file.seek(0) # Đưa con trỏ về đầu file
                         st.download_button(
-                            label=f"⬇️ BẤM ĐỂ TẢI: {new_name}",
+                            label=f"⬇️ TẢI FILE NÀY ({new_name})",
                             data=uploaded_file,
                             file_name=new_name,
                             mime='application/pdf',
-                            key=f"btn_{i}" # Key để không bị lỗi khi tải nhiều file
+                            key=f"btn_{i}"
                         )
                     
                 except Exception as e:
                     st.error(f"❌ Lỗi xử lý file {original_name}: {e}")
             
-            st.write("---") # Đường gạch ngang phân cách các file
+            st.write("---") 
 
 else:
-    st.warning("👉 Nhập API Key ở trên để bắt đầu nhé!")
+    st.warning("👉 Nhập API Key để bắt đầu.")
