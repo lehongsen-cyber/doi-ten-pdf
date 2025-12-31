@@ -1,14 +1,11 @@
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
-import io
-import zipfile
-import time
 
 # --- Cấu hình trang web ---
-st.set_page_config(page_title="Đổi tên PDF Chuẩn", layout="centered")
-st.title("📂 Công cụ đổi tên PDF (Bản ổn định)")
-st.write("Cấu trúc: YYYYMMDD_LOAI_SoHieu_NoiDung_Signed.pdf")
+st.set_page_config(page_title="Đổi tên PDF - Tải Trực Tiếp", layout="centered")
+st.title("📂 Đổi tên PDF & Tải File Luôn")
+st.write("Xử lý xong file nào -> Hiện nút tải file đó.")
 
 # --- Nhập API Key ---
 with st.expander("🔑 Cài đặt API Key", expanded=True):
@@ -18,87 +15,79 @@ with st.expander("🔑 Cài đặt API Key", expanded=True):
 def get_new_filename(text_content, api_key):
     try:
         genai.configure(api_key=api_key)
-        # Chuyển sang model gemini-pro cho ổn định
-        model = genai.GenerativeModel('gemini-1.5-flash') 
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""
-        Nhiệm vụ: Đặt tên file cho văn bản dưới đây theo quy tắc:
-        YYYYMMDD_LOAI_SoHieu_NoiDung_Signed.pdf
-
+        Nhiệm vụ: Đặt tên file ngắn gọn cho văn bản sau.
+        Cấu trúc: YYYYMMDD_LOAI_SoHieu_NoiDung_Signed.pdf
+        
         Quy tắc:
-        - YYYYMMDD: Năm tháng ngày văn bản (Ví dụ 20251231).
-        - LOAI: QD, TTr, CV, TB, GP, HD, BB, BC...
+        - YYYYMMDD: Năm tháng ngày (Ví dụ 20251231).
+        - LOAI: QD, TTr, CV, TB, GP, HD...
         - SoHieu: 125-UBND (Thay / bằng -).
         - NoiDung: Tiếng Việt không dấu, nối bằng gạch dưới (_).
         
         Văn bản:
-        {text_content[:4000]}
+        {text_content[:3000]} 
 
-        Chỉ trả về 1 dòng tên file duy nhất.
+        Chỉ trả về 1 tên file duy nhất kết thúc bằng .pdf
         """
+        
         response = model.generate_content(prompt)
         clean_name = response.text.strip().replace("`", "")
         if not clean_name.lower().endswith(".pdf"):
             clean_name += ".pdf"
-        return clean_name
+        return clean_name, None
     except Exception as e:
-        # Nếu lỗi thì trả về None để xử lý sau
-        return None
+        return None, str(e)
 
 # --- Giao diện chính ---
 if api_key:
     uploaded_files = st.file_uploader("Chọn file PDF", type=['pdf'], accept_multiple_files=True)
 
-    if uploaded_files and st.button("🚀 Đổi tên ngay"):
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        results = []
-        zip_buffer = io.BytesIO()
-        
-        with zipfile.ZipFile(zip_buffer, "w") as zf:
-            for i, uploaded_file in enumerate(uploaded_files):
-                original_name = uploaded_file.name
-                status_text.text(f"Đang xử lý: {original_name}...")
+    if uploaded_files and st.button("🚀 Xử lý ngay"):
+        st.write("---")
+        for i, uploaded_file in enumerate(uploaded_files):
+            original_name = uploaded_file.name
+            
+            # Tạo container cho từng file để nhìn cho gọn
+            with st.container():
+                st.info(f"Đang đọc file: {original_name}...")
                 
                 try:
                     # Đọc PDF
                     reader = PdfReader(uploaded_file)
                     text = ""
-                    for p in range(min(2, len(reader.pages))):
-                        text += reader.pages[p].extract_text()
+                    if len(reader.pages) > 0:
+                        text = reader.pages[0].extract_text()
                     
                     if not text:
                         text = "Văn bản scan không đọc được text"
 
                     # Gọi AI
-                    new_name = get_new_filename(text, api_key)
+                    new_name, error_msg = get_new_filename(text, api_key)
                     
-                    # Nếu AI lỗi hoặc không trả về tên, dùng lại tên cũ thêm chữ _CheckLai
-                    if new_name is None or "Loi_AI" in new_name:
-                        new_name = f"ERROR_{original_name}"
-                        results.append(f"⚠️ {original_name} -> **Lỗi kết nối AI (Giữ file gốc)**")
+                    if error_msg:
+                        st.error(f"❌ Lỗi: {error_msg}")
                     else:
-                        results.append(f"✅ {original_name} -> **{new_name}**")
-                    
-                    # Quan trọng: Ghi nội dung file gốc vào tên mới
-                    uploaded_file.seek(0)
-                    zf.writestr(new_name, uploaded_file.read())
+                        st.success(f"✅ Đã đổi tên thành: **{new_name}**")
+                        
+                        # --- NÚT TẢI PDF TRỰC TIẾP ---
+                        # Đưa con trỏ file về đầu để đọc lại nội dung
+                        uploaded_file.seek(0)
+                        
+                        st.download_button(
+                            label=f"⬇️ BẤM ĐỂ TẢI: {new_name}",
+                            data=uploaded_file,
+                            file_name=new_name,
+                            mime='application/pdf',
+                            key=f"btn_{i}" # Key để không bị lỗi khi tải nhiều file
+                        )
                     
                 except Exception as e:
-                    results.append(f"❌ {original_name}: Lỗi file - {e}")
-                
-                progress_bar.progress((i + 1) / len(uploaded_files))
+                    st.error(f"❌ Lỗi xử lý file {original_name}: {e}")
+            
+            st.write("---") # Đường gạch ngang phân cách các file
 
-        status_text.text("Xử lý xong!")
-        st.success("Hoàn thành!")
-        
-        for res in results:
-            st.markdown(res)
-
-        zip_buffer.seek(0)
-        st.download_button(
-            label="⬇️ Tải file PDF đã đổi tên (ZIP)",
-            data=zip_buffer,
-            file_name="File_PDF_Da_Doi_Ten.zip",
-            mime="application/zip"
-        )
+else:
+    st.warning("👉 Nhập API Key ở trên để bắt đầu nhé!")
