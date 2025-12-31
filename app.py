@@ -13,19 +13,30 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- CSS TÙY CHỈNH (ĐÃ FIX MÀU CHỮ) ---
 st.markdown("""
 <style>
     h1 {color: #2E86C1; font-family: 'Helvetica Neue', sans-serif;}
+    
+    /* FIX LỖI MÀU CHỮ: Ép chữ màu đen (color: #31333F) để nổi trên nền trắng */
     .result-card {
-        background-color: #f0f2f6; padding: 20px; border-radius: 10px;
-        border-left: 5px solid #28a745; margin-bottom: 15px;
+        background-color: #f8f9fa; 
+        padding: 20px; 
+        border-radius: 10px;
+        border-left: 5px solid #28a745; 
+        margin-bottom: 15px;
+        color: #31333F !important; /* Quan trọng: Màu đen đè lên màu trắng của DarkMode */
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
     }
+    
     .stButton>button {width: 100%; border-radius: 8px; height: 3em; font-weight: bold;}
+    
+    /* Ẩn bớt footer thừa */
     #MainMenu {visibility: hidden;} footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- LOGIC XỬ LÝ (CÓ THÊM TÍNH NĂNG TỰ CHỜ) ---
+# --- LOGIC XỬ LÝ (GIỮ NGUYÊN) ---
 def get_best_model(api_key):
     genai.configure(api_key=api_key)
     try:
@@ -51,7 +62,6 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
         
-        # 1. Chụp ảnh
         uploaded_file.seek(0)
         img_data = pdf_page_to_image(uploaded_file)
         if img_data is None: return "ERROR", "Lỗi đọc file."
@@ -69,7 +79,6 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
         Chỉ trả về tên file.
         """
         
-        # 2. Gửi đi với cơ chế TỰ ĐỘNG THỬ LẠI (Retry)
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -79,33 +88,33 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
                 return new_name, None
                 
             except Exception as e:
-                # Nếu gặp lỗi 429 (Hết lượt) -> Chờ 32 giây rồi thử lại
                 if "429" in str(e) or "Quota" in str(e):
                     if attempt < max_retries - 1:
                         with status_container:
-                            st.warning(f"⏳ Google đang bận (Hết lượt miễn phí). Đang chờ 32s để hồi phục... (Lần {attempt+1})")
-                            time.sleep(32) # Chờ 32 giây
+                            st.warning(f"⏳ Google đang bận. Đang chờ 32s để hồi phục... (Lần {attempt+1})")
+                            time.sleep(32)
                             st.info("🔄 Đang thử lại...")
-                            continue # Quay lại vòng lặp
+                            continue
                     else:
                         return None, "Google quá tải, vui lòng thử lại sau 1 phút."
                 else:
-                    return None, str(e) # Lỗi khác thì báo luôn
+                    return None, str(e)
                     
     except Exception as e:
         return None, str(e)
 
-# --- GIAO DIỆN ---
+# --- GIAO DIỆN NGƯỜI DÙNG ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3143/3143460.png", width=80)
     st.title("Smart Renamer")
     st.markdown("---")
     with st.expander("🔑 Google API Key", expanded=True):
         api_key = st.text_input("Dán Key vào đây:", type="password")
-    st.caption("Auto-Retry enabled: Tự động chờ khi hết quota.")
+    st.caption("Auto-Retry enabled.")
 
 st.title("📑 HỆ THỐNG SỐ HÓA TÊN TÀI LIỆU")
-st.markdown("##### 🚀 Tự động đổi tên văn bản hành chính (Chống lỗi 429)")
+# Đã xóa dòng chữ (Chống lỗi 429) theo yêu cầu
+st.markdown("##### 🚀 Tự động đổi tên văn bản hành chính")
 
 uploaded_files = st.file_uploader("", type=['pdf'], accept_multiple_files=True)
 
@@ -128,24 +137,22 @@ if uploaded_files:
             
             for i, uploaded_file in enumerate(uploaded_files):
                 with st.container():
-                    # Tạo chỗ trống để hiện thông báo chờ nếu cần
                     status_box = st.empty()
                     
-                    # Gọi hàm xử lý thông minh
                     new_name, error_msg = process_with_retry(uploaded_file, api_key, active_model, status_box)
                     
                     if error_msg:
                         st.error(f"❌ {uploaded_file.name}: {error_msg}")
                     else:
-                        # Clear thông báo chờ nếu có
                         status_box.empty()
                         
                         col_info, col_dl = st.columns([3, 1])
                         with col_info:
+                            # Card UI đã sửa màu chữ
                             st.markdown(f"""
                             <div class="result-card">
                                 <b>📄 Gốc:</b> {uploaded_file.name}<br>
-                                <b style="color: green; font-size: 1.1em;">✅ Mới:</b> {new_name}
+                                <b style="color: #28a745; font-size: 1.1em;">✅ Mới:</b> {new_name}
                             </div>
                             """, unsafe_allow_html=True)
                         with col_dl:
