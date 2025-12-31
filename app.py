@@ -31,7 +31,6 @@ st.markdown("""
     
     .stButton>button {width: 100%; border-radius: 8px; height: 3em; font-weight: bold;}
     
-    /* Ẩn bớt footer thừa */
     #MainMenu {visibility: hidden;} footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
@@ -79,7 +78,10 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
         Chỉ trả về tên file.
         """
         
-        max_retries = 3
+        # --- CẤU HÌNH LÌ ĐÒN ---
+        max_retries = 10  # Thử hẳn 10 lần cho chắc
+        wait_time = 65    # Chờ hẳn 65 giây (vì Google bắt chờ 60s)
+        
         for attempt in range(max_retries):
             try:
                 result = model.generate_content([prompt, image_part])
@@ -88,15 +90,17 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
                 return new_name, None
                 
             except Exception as e:
-                if "429" in str(e) or "Quota" in str(e):
+                if "429" in str(e) or "Quota" in str(e) or "400" in str(e):
                     if attempt < max_retries - 1:
                         with status_container:
-                            st.warning(f"⏳ Google đang bận. Đang chờ 32s để hồi phục... (Lần {attempt+1})")
-                            time.sleep(32)
-                            st.info("🔄 Đang thử lại...")
+                            # Đếm ngược cho người dùng đỡ sốt ruột
+                            for s in range(wait_time, 0, -1):
+                                st.warning(f"⏳ Google đang quá tải. Vui lòng chờ {s} giây để thử lại (Lần {attempt+1}/{max_retries})...")
+                                time.sleep(1)
+                            st.info("🔄 Đang kết nối lại...")
                             continue
                     else:
-                        return None, "Google quá tải, vui lòng thử lại sau 1 phút."
+                        return None, "Google quá tải quá lâu. Vui lòng thử lại vào ngày mai (Hết quota ngày)."
                 else:
                     return None, str(e)
                     
@@ -113,7 +117,6 @@ with st.sidebar:
     st.caption("Auto-Retry enabled.")
 
 st.title("📑 HỆ THỐNG SỐ HÓA TÊN TÀI LIỆU")
-# Đã xóa dòng chữ (Chống lỗi 429) theo yêu cầu
 st.markdown("##### 🚀 Tự động đổi tên văn bản hành chính")
 
 uploaded_files = st.file_uploader("", type=['pdf'], accept_multiple_files=True)
@@ -148,7 +151,6 @@ if uploaded_files:
                         
                         col_info, col_dl = st.columns([3, 1])
                         with col_info:
-                            # Card UI đã sửa màu chữ
                             st.markdown(f"""
                             <div class="result-card">
                                 <b>📄 Gốc:</b> {uploaded_file.name}<br>
