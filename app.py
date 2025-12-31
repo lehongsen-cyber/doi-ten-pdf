@@ -3,109 +3,102 @@ import google.generativeai as genai
 from pypdf import PdfReader
 import io
 import zipfile
+import time
 
 # --- Cấu hình trang web ---
-st.set_page_config(page_title="Đổi tên PDF Chuẩn Quy Tắc", layout="centered")
-
-st.title("📂 Công cụ đổi tên PDF theo Quy chuẩn")
+st.set_page_config(page_title="Đổi tên PDF Chuẩn", layout="centered")
+st.title("📂 Công cụ đổi tên PDF (Bản ổn định)")
 st.write("Cấu trúc: YYYYMMDD_LOAI_SoHieu_NoiDung_Signed.pdf")
 
 # --- Nhập API Key ---
-with st.expander("🔑 Cài đặt API Key (Bắt buộc)", expanded=True):
-    api_key = st.text_input("Dán Google API Key của bạn vào đây:", type="password")
-    st.markdown("Chưa có Key? [Lấy miễn phí tại đây](https://aistudio.google.com/app/apikey)")
+with st.expander("🔑 Cài đặt API Key", expanded=True):
+    api_key = st.text_input("Nhập Google API Key:", type="password")
 
 # --- Hàm xử lý ---
 def get_new_filename(text_content, api_key):
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Chuyển sang model gemini-pro cho ổn định
+        model = genai.GenerativeModel('gemini-1.5-flash') 
         
-        # Cập nhật Prompt theo file quy tắc mới
         prompt = f"""
-        Bạn là trợ lý văn thư chuyên nghiệp. Hãy đặt tên file dựa trên nội dung văn bản theo quy tắc đặt tên file chuẩn (Naming Convention) sau đây:
+        Nhiệm vụ: Đặt tên file cho văn bản dưới đây theo quy tắc:
+        YYYYMMDD_LOAI_SoHieu_NoiDung_Signed.pdf
 
-        1. CẤU TRÚC: YYYYMMDD_LOAI_SoHieu_NoiDung_TrangThai.pdf
-
-        2. QUY TẮC CHI TIẾT:
-           - YYYYMMDD: Năm-Tháng-Ngày ban hành văn bản (Viết liền, không dấu gạch). Ví dụ: 20251231.
-           - LOAI: Xác định và viết tắt loại văn bản:
-             + QD (Quyết định), TTr (Tờ trình), CV (Công văn), TB (Thông báo)
-             + GP (Giấy phép), HD (Hợp đồng), BB (Biên bản), BC (Báo cáo)
-           - SoHieu: Số hiệu văn bản. Thay dấu gạch chéo (/) bằng dấu gạch ngang (-). Ví dụ: 125/UBND -> 125-UBND.
-           - NoiDung: Tóm tắt ngắn gọn nội dung chính bằng TIẾNG VIỆT KHÔNG DẤU, nối bằng dấu gạch dưới (_).
-           - TrangThai: Mặc định luôn để là "Signed" (vì đây là file scan).
-
-        3. VÍ DỤ MẪU:
-           Input: Một quyết định giao đất số 125/UBND ngày 15/08/2025.
-           Output: 20250815_QD_125-UBND_Giao_dat_Dot1_Signed.pdf
-
-        YÊU CẦU ĐẶC BIỆT: 
-        - Chỉ trả về duy nhất tên file kết quả. Không giải thích gì thêm.
-        - Đảm bảo đúng thứ tự và dùng dấu gạch dưới (_) để nối các phần.
+        Quy tắc:
+        - YYYYMMDD: Năm tháng ngày văn bản (Ví dụ 20251231).
+        - LOAI: QD, TTr, CV, TB, GP, HD, BB, BC...
+        - SoHieu: 125-UBND (Thay / bằng -).
+        - NoiDung: Tiếng Việt không dấu, nối bằng gạch dưới (_).
         
-        Nội dung văn bản cần đặt tên:
-        {text_content[:5000]}
+        Văn bản:
+        {text_content[:4000]}
+
+        Chỉ trả về 1 dòng tên file duy nhất.
         """
-        
         response = model.generate_content(prompt)
-        # Làm sạch chuỗi kết quả (bỏ khoảng trắng thừa, bỏ dấu ngoặc nếu AI lỡ thêm vào)
-        clean_name = response.text.strip().replace("`", "").replace(".pdf", "")
-        return clean_name + ".pdf"
-        
+        clean_name = response.text.strip().replace("`", "")
+        if not clean_name.lower().endswith(".pdf"):
+            clean_name += ".pdf"
+        return clean_name
     except Exception as e:
-        return f"Loi_AI_{str(e)[:10]}.pdf"
+        # Nếu lỗi thì trả về None để xử lý sau
+        return None
 
 # --- Giao diện chính ---
 if api_key:
-    uploaded_files = st.file_uploader("Chọn file PDF (Scan/Văn bản)", type=['pdf'], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Chọn file PDF", type=['pdf'], accept_multiple_files=True)
 
-    if uploaded_files and st.button("🚀 Thực hiện đổi tên"):
+    if uploaded_files and st.button("🚀 Đổi tên ngay"):
         progress_bar = st.progress(0)
+        status_text = st.empty()
         results = []
         zip_buffer = io.BytesIO()
         
         with zipfile.ZipFile(zip_buffer, "w") as zf:
             for i, uploaded_file in enumerate(uploaded_files):
+                original_name = uploaded_file.name
+                status_text.text(f"Đang xử lý: {original_name}...")
+                
                 try:
+                    # Đọc PDF
                     reader = PdfReader(uploaded_file)
                     text = ""
-                    # Cố gắng đọc 2 trang đầu để lấy đủ thông tin ngày tháng/số hiệu
-                    num_pages = len(reader.pages)
-                    read_pages = min(2, num_pages)
-                    for p in range(read_pages):
+                    for p in range(min(2, len(reader.pages))):
                         text += reader.pages[p].extract_text()
                     
                     if not text:
-                        text = "Không đọc được text (File ảnh scan chưa OCR)"
+                        text = "Văn bản scan không đọc được text"
 
+                    # Gọi AI
                     new_name = get_new_filename(text, api_key)
                     
-                    # Kiểm tra lại đuôi pdf lần nữa cho chắc
-                    if not new_name.lower().endswith(".pdf"):
-                        new_name += ".pdf"
-                        
-                    results.append(f"✅ {uploaded_file.name} \n   -> **{new_name}**")
+                    # Nếu AI lỗi hoặc không trả về tên, dùng lại tên cũ thêm chữ _CheckLai
+                    if new_name is None or "Loi_AI" in new_name:
+                        new_name = f"ERROR_{original_name}"
+                        results.append(f"⚠️ {original_name} -> **Lỗi kết nối AI (Giữ file gốc)**")
+                    else:
+                        results.append(f"✅ {original_name} -> **{new_name}**")
                     
+                    # Quan trọng: Ghi nội dung file gốc vào tên mới
                     uploaded_file.seek(0)
                     zf.writestr(new_name, uploaded_file.read())
                     
                 except Exception as e:
-                    results.append(f"❌ {uploaded_file.name}: Lỗi - {e}")
+                    results.append(f"❌ {original_name}: Lỗi file - {e}")
                 
                 progress_bar.progress((i + 1) / len(uploaded_files))
 
-        st.success("Xử lý hoàn tất!")
+        status_text.text("Xử lý xong!")
+        st.success("Hoàn thành!")
+        
         for res in results:
             st.markdown(res)
-            st.markdown("---")
 
         zip_buffer.seek(0)
         st.download_button(
-            label="⬇️ Tải về tất cả (ZIP)",
+            label="⬇️ Tải file PDF đã đổi tên (ZIP)",
             data=zip_buffer,
-            file_name="Ho_so_da_chuan_hoa.zip",
+            file_name="File_PDF_Da_Doi_Ten.zip",
             mime="application/zip"
         )
-else:
-    st.info("👋 Xin chào! Vui lòng nhập Google API Key để bắt đầu.")
