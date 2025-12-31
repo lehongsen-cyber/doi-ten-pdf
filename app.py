@@ -3,45 +3,29 @@ import google.generativeai as genai
 import fitz  # PyMuPDF
 from pypdf import PdfReader
 import io
+import time
 
-# --- CẤU HÌNH GIAO DIỆN (Widescreen + Icon) ---
+# --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(
     page_title="Smart PDF Renamer Pro",
     page_icon="📑",
-    layout="wide", # Chế độ màn hình rộng
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- CSS TÙY CHỈNH (Cho giao diện đẹp hơn) ---
 st.markdown("""
 <style>
-    /* Chỉnh font chữ và tiêu đề */
-    h1 {
-        color: #2E86C1;
-        font-family: 'Helvetica Neue', sans-serif;
-    }
-    /* Tạo khung viền (Card) cho từng file kết quả */
+    h1 {color: #2E86C1; font-family: 'Helvetica Neue', sans-serif;}
     .result-card {
-        background-color: #f0f2f6;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #28a745;
-        margin-bottom: 15px;
+        background-color: #f0f2f6; padding: 20px; border-radius: 10px;
+        border-left: 5px solid #28a745; margin-bottom: 15px;
     }
-    /* Chỉnh nút bấm to đẹp */
-    .stButton>button {
-        width: 100%;
-        border-radius: 8px;
-        height: 3em;
-        font-weight: bold;
-    }
-    /* Ẩn menu mặc định của Streamlit cho giống App riêng */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+    .stButton>button {width: 100%; border-radius: 8px; height: 3em; font-weight: bold;}
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- LOGIC XỬ LÝ (GIỮ NGUYÊN CÁI ĐANG CHẠY NGON) ---
+# --- LOGIC XỬ LÝ (CÓ THÊM TÍNH NĂNG TỰ CHỜ) ---
 def get_best_model(api_key):
     genai.configure(api_key=api_key)
     try:
@@ -62,114 +46,111 @@ def pdf_page_to_image(uploaded_file):
     except Exception:
         return None
 
-def process_with_snapshot(uploaded_file, api_key, model_name):
+def process_with_retry(uploaded_file, api_key, model_name, status_container):
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
         
+        # 1. Chụp ảnh
         uploaded_file.seek(0)
         img_data = pdf_page_to_image(uploaded_file)
-        
-        if img_data is None:
-            return "ERROR", "Không thể chụp ảnh file (File lỗi)."
+        if img_data is None: return "ERROR", "Lỗi đọc file."
 
         image_part = {"mime_type": "image/png", "data": img_data}
-
-        prompt = """
-        Trích xuất thông tin để đặt tên file PDF này theo chuẩn hành chính Việt Nam.
-        Cấu trúc: YYYYMMDD_LOAI_SoHieu_NoiDung_Signed.pdf
         
+        prompt = """
+        Trích xuất thông tin đặt tên file PDF theo chuẩn hành chính VN.
+        Cấu trúc: YYYYMMDD_LOAI_SoHieu_NoiDung_Signed.pdf
         Quy tắc:
         - YYYYMMDD: Năm tháng ngày (Ví dụ 20251231).
         - LOAI: QD, TTr, CV, TB, GP, HD, BB, BC...
         - SoHieu: Số hiệu (Ví dụ 125-UBND, thay / bằng -).
-        - NoiDung: Tiếng Việt không dấu, tóm tắt ngắn gọn, nối bằng gạch dưới (_).
-        
+        - NoiDung: Tiếng Việt không dấu, tóm tắt, nối bằng gạch dưới (_).
         Chỉ trả về tên file.
         """
         
-        result = model.generate_content([prompt, image_part])
-        new_name = result.text.strip().replace("`", "")
-        if not new_name.lower().endswith(".pdf"):
-            new_name += ".pdf"
-            
-        return new_name, None
-        
+        # 2. Gửi đi với cơ chế TỰ ĐỘNG THỬ LẠI (Retry)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = model.generate_content([prompt, image_part])
+                new_name = result.text.strip().replace("`", "")
+                if not new_name.lower().endswith(".pdf"): new_name += ".pdf"
+                return new_name, None
+                
+            except Exception as e:
+                # Nếu gặp lỗi 429 (Hết lượt) -> Chờ 32 giây rồi thử lại
+                if "429" in str(e) or "Quota" in str(e):
+                    if attempt < max_retries - 1:
+                        with status_container:
+                            st.warning(f"⏳ Google đang bận (Hết lượt miễn phí). Đang chờ 32s để hồi phục... (Lần {attempt+1})")
+                            time.sleep(32) # Chờ 32 giây
+                            st.info("🔄 Đang thử lại...")
+                            continue # Quay lại vòng lặp
+                    else:
+                        return None, "Google quá tải, vui lòng thử lại sau 1 phút."
+                else:
+                    return None, str(e) # Lỗi khác thì báo luôn
+                    
     except Exception as e:
         return None, str(e)
 
-# --- GIAO DIỆN NGƯỜI DÙNG (UI) ---
-
-# 1. SIDEBAR (Thanh bên trái)
+# --- GIAO DIỆN ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3143/3143460.png", width=80)
-    st.title("Cấu Hình Hệ Thống")
+    st.title("Smart Renamer")
     st.markdown("---")
-    
     with st.expander("🔑 Google API Key", expanded=True):
-        api_key = st.text_input("Dán Key vào đây:", type="password", help="Key giúp AI hoạt động")
-        st.caption("[Lấy API Key miễn phí tại đây](https://aistudio.google.com/app/apikey)")
-    
-    st.info("💡 **Mẹo:** App dùng công nghệ chụp ảnh nên xử lý được mọi loại file (Scan, Ký số, File nặng).")
-    st.markdown("---")
-    st.caption("Developed by Gemini & You")
+        api_key = st.text_input("Dán Key vào đây:", type="password")
+    st.caption("Auto-Retry enabled: Tự động chờ khi hết quota.")
 
-# 2. MAIN AREA (Khu vực chính)
 st.title("📑 HỆ THỐNG SỐ HÓA TÊN TÀI LIỆU")
-st.markdown("##### 🚀 Tự động đổi tên văn bản hành chính bằng AI (Công nghệ Vision)")
+st.markdown("##### 🚀 Tự động đổi tên văn bản hành chính (Chống lỗi 429)")
 
-# Upload file
-uploaded_files = st.file_uploader("", type=['pdf'], accept_multiple_files=True, help="Kéo thả file vào đây")
+uploaded_files = st.file_uploader("", type=['pdf'], accept_multiple_files=True)
 
-# Nút xử lý
 if uploaded_files:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        start_btn = st.button("✨ BẮT ĐẦU XỬ LÝ NGAY ✨", type="primary")
+        start_btn = st.button("✨ BẮT ĐẦU XỬ LÝ ✨", type="primary")
 
     if start_btn:
         if not api_key:
-            st.toast("⚠️ Vui lòng nhập API Key bên thanh trái trước!", icon="⚠️")
+            st.toast("⚠️ Nhập API Key trước!", icon="⚠️")
         else:
-            # Tìm model
-            with st.status("🤖 Đang khởi động AI...", expanded=True) as status:
-                active_model = get_best_model(api_key)
-                if not active_model:
-                    status.update(label="❌ API Key không hợp lệ!", state="error")
-                    st.stop()
-                status.update(label=f"✅ Đã kết nối: {active_model}", state="complete", expanded=False)
-
-            st.write("---")
+            active_model = get_best_model(api_key)
+            if not active_model:
+                st.error("❌ Key không hợp lệ!")
+                st.stop()
             
-            # Thanh tiến trình
+            st.success(f"✅ Đã kết nối: {active_model}")
             progress_bar = st.progress(0)
             
-            # Xử lý từng file và hiện Card
             for i, uploaded_file in enumerate(uploaded_files):
-                # Layout chia đôi: Bên trái tên cũ, Bên phải kết quả
-                
                 with st.container():
-                    # Gọi hàm xử lý
-                    new_name, error_msg = process_with_snapshot(uploaded_file, api_key, active_model)
+                    # Tạo chỗ trống để hiện thông báo chờ nếu cần
+                    status_box = st.empty()
+                    
+                    # Gọi hàm xử lý thông minh
+                    new_name, error_msg = process_with_retry(uploaded_file, api_key, active_model, status_box)
                     
                     if error_msg:
                         st.error(f"❌ {uploaded_file.name}: {error_msg}")
                     else:
-                        # Giao diện Card đẹp
-                        col_info, col_dl = st.columns([3, 1])
+                        # Clear thông báo chờ nếu có
+                        status_box.empty()
                         
+                        col_info, col_dl = st.columns([3, 1])
                         with col_info:
                             st.markdown(f"""
                             <div class="result-card">
-                                <b>📄 Tên gốc:</b> {uploaded_file.name}<br>
-                                <b style="color: green; font-size: 1.1em;">✅ Tên mới:</b> {new_name}
+                                <b>📄 Gốc:</b> {uploaded_file.name}<br>
+                                <b style="color: green; font-size: 1.1em;">✅ Mới:</b> {new_name}
                             </div>
                             """, unsafe_allow_html=True)
-                            
                         with col_dl:
-                            # Nút download căn giữa
-                            st.write("") # Spacer
-                            st.write("") # Spacer
+                            st.write("")
+                            st.write("")
                             uploaded_file.seek(0)
                             st.download_button(
                                 label="⬇️ TẢI VỀ",
@@ -179,18 +160,7 @@ if uploaded_files:
                                 key=f"dl_{i}",
                                 use_container_width=True
                             )
-                
-                # Update progress
                 progress_bar.progress((i + 1) / len(uploaded_files))
             
-            st.balloons() # Pháo hoa chúc mừng khi xong hết
-            st.success("🎉 Đã xử lý xong tất cả hồ sơ!")
-
-else:
-    # Màn hình chờ đẹp mắt khi chưa chọn file
-    st.markdown("""
-    <div style="text-align: center; color: gray; padding: 50px;">
-        <h3>👋 Chào bạn!</h3>
-        <p>Vui lòng upload file PDF để bắt đầu.</p>
-    </div>
-    """, unsafe_allow_html=True)
+            st.balloons()
+            st.success("🎉 Hoàn tất!")
