@@ -111,9 +111,9 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
     except Exception as e:
         return None, str(e)
 
-# --- GIAO DIỆN NGƯỜI DÙNG (ĐÃ THÊM LOGO & QR) ---
+# --- GIAO DIỆN NGƯỜI DÙNG (ĐÃ SỬA TEXT TIẾNG VIỆT) ---
 with st.sidebar:
-    # 1. LOGO TRÒN (Nếu có file logo.jpg thì hiện, không thì bỏ qua)
+    # 1. LOGO
     if os.path.exists("logo.jpg"):
         st.image("logo.jpg", width=120)
     
@@ -126,14 +126,14 @@ with st.sidebar:
     st.caption("✅ Auto-Retry enabled.")
     st.markdown("---")
     
-    # 2. QR CODE & CREDITS
+    # 2. QR CODE & CREDITS MỚI
     st.markdown("<h4 style='text-align: center;'>Tham gia cộng đồng</h4>", unsafe_allow_html=True)
     if os.path.exists("qr.jpg"):
         st.image("qr.jpg", use_container_width=True)
     
     st.markdown("""
     <div style="text-align: center; margin-top: 10px; font-size: 0.8em; color: gray;">
-        <b>Created by Admin of Investment - PTDA Group</b>
+        <b>Created by Anh em Phát triển Dự án Miền Nam</b>
     </div>
     """, unsafe_allow_html=True)
 
