@@ -4,6 +4,7 @@ import fitz  # PyMuPDF
 from pypdf import PdfReader
 import io
 import time
+import os
 
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(
@@ -13,25 +14,30 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS TÙY CHỈNH (ĐÃ FIX MÀU CHỮ) ---
+# --- CSS TÙY CHỈNH ---
 st.markdown("""
 <style>
     h1 {color: #2E86C1; font-family: 'Helvetica Neue', sans-serif;}
     
-    /* FIX LỖI MÀU CHỮ: Ép chữ màu đen (color: #31333F) để nổi trên nền trắng */
     .result-card {
         background-color: #f8f9fa; 
         padding: 20px; 
         border-radius: 10px;
         border-left: 5px solid #28a745; 
         margin-bottom: 15px;
-        color: #31333F !important; /* Quan trọng: Màu đen đè lên màu trắng của DarkMode */
+        color: #31333F !important;
         box-shadow: 0 2px 5px rgba(0,0,0,0.05);
     }
     
     .stButton>button {width: 100%; border-radius: 8px; height: 3em; font-weight: bold;}
-    
     #MainMenu {visibility: hidden;} footer {visibility: hidden;}
+    
+    /* Căn giữa ảnh trong Sidebar */
+    [data-testid="stSidebar"] img {
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -78,9 +84,8 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
         Chỉ trả về tên file.
         """
         
-        # --- CẤU HÌNH LÌ ĐÒN ---
-        max_retries = 10  # Thử hẳn 10 lần cho chắc
-        wait_time = 65    # Chờ hẳn 65 giây (vì Google bắt chờ 60s)
+        max_retries = 10
+        wait_time = 65
         
         for attempt in range(max_retries):
             try:
@@ -93,7 +98,6 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
                 if "429" in str(e) or "Quota" in str(e) or "400" in str(e):
                     if attempt < max_retries - 1:
                         with status_container:
-                            # Đếm ngược cho người dùng đỡ sốt ruột
                             for s in range(wait_time, 0, -1):
                                 st.warning(f"⏳ Google đang quá tải. Vui lòng chờ {s} giây để thử lại (Lần {attempt+1}/{max_retries})...")
                                 time.sleep(1)
@@ -107,15 +111,33 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
     except Exception as e:
         return None, str(e)
 
-# --- GIAO DIỆN NGƯỜI DÙNG ---
+# --- GIAO DIỆN NGƯỜI DÙNG (ĐÃ THÊM LOGO & QR) ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3143/3143460.png", width=80)
+    # 1. LOGO TRÒN (Nếu có file logo.jpg thì hiện, không thì bỏ qua)
+    if os.path.exists("logo.jpg"):
+        st.image("logo.jpg", width=120)
+    
     st.title("Smart Renamer")
     st.markdown("---")
+    
     with st.expander("🔑 Google API Key", expanded=True):
         api_key = st.text_input("Dán Key vào đây:", type="password")
-    st.caption("Auto-Retry enabled.")
+    
+    st.caption("✅ Auto-Retry enabled.")
+    st.markdown("---")
+    
+    # 2. QR CODE & CREDITS
+    st.markdown("<h4 style='text-align: center;'>Tham gia cộng đồng</h4>", unsafe_allow_html=True)
+    if os.path.exists("qr.jpg"):
+        st.image("qr.jpg", use_container_width=True)
+    
+    st.markdown("""
+    <div style="text-align: center; margin-top: 10px; font-size: 0.8em; color: gray;">
+        <b>Created by Admin of Investment - PTDA Group</b>
+    </div>
+    """, unsafe_allow_html=True)
 
+# --- PHẦN CHÍNH ---
 st.title("📑 HỆ THỐNG SỐ HÓA TÊN TÀI LIỆU")
 st.markdown("##### 🚀 Tự động đổi tên văn bản hành chính")
 
