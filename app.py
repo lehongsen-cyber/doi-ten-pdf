@@ -1,14 +1,14 @@
 import streamlit as st
 import google.generativeai as genai
 import fitz  # PyMuPDF
-from pypdf import PdfReader
 import io
 import time
 import os
+import zipfile
 
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(
-    page_title="Smart PDF Renamer Pro",
+    page_title="Smart Renamer - Group PTDA",
     page_icon="📑",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -30,7 +30,6 @@ st.markdown("""
     }
     
     .stButton>button {width: 100%; border-radius: 8px; height: 3em; font-weight: bold;}
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;}
     
     /* Căn giữa ảnh trong Sidebar */
     [data-testid="stSidebar"] img {
@@ -38,6 +37,7 @@ st.markdown("""
         margin-left: auto;
         margin-right: auto;
     }
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -73,18 +73,20 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
 
         image_part = {"mime_type": "image/png", "data": img_data}
         
+        # --- QUY TẮC CŨ CỦA NHÓM PTDA (YYYYMMDD) ---
         prompt = """
         Trích xuất thông tin đặt tên file PDF theo chuẩn hành chính VN.
-        Cấu trúc: YYYYMMDD_LOAI_SoHieu_NoiDung_Signed.pdf
+        Cấu trúc: YYYYMMDD_LOAI_SoHieu_NoiDung_TrangThai.pdf
         Quy tắc:
-        - YYYYMMDD: Năm tháng ngày (Ví dụ 20251231).
+        - YYYYMMDD: Năm tháng ngày (Ví dụ: 20251231). Viết liền 8 số.
         - LOAI: QD, TTr, CV, TB, GP, HD, BB, BC...
         - SoHieu: Số hiệu (Ví dụ 125-UBND, thay / bằng -).
         - NoiDung: Tiếng Việt không dấu, tóm tắt, nối bằng gạch dưới (_).
+        - TrangThai: Mặc định 'Signed'.
         Chỉ trả về tên file.
         """
         
-        max_retries = 10
+        max_retries = 5
         wait_time = 65
         
         for attempt in range(max_retries):
@@ -99,19 +101,19 @@ def process_with_retry(uploaded_file, api_key, model_name, status_container):
                     if attempt < max_retries - 1:
                         with status_container:
                             for s in range(wait_time, 0, -1):
-                                st.warning(f"⏳ Google đang quá tải. Vui lòng chờ {s} giây để thử lại (Lần {attempt+1}/{max_retries})...")
+                                st.warning(f"⏳ Google đang quá tải. Vui lòng chờ {s} giây... (Lần {attempt+1})")
                                 time.sleep(1)
                             st.info("🔄 Đang kết nối lại...")
                             continue
                     else:
-                        return None, "Google quá tải quá lâu. Vui lòng thử lại vào ngày mai (Hết quota ngày)."
+                        return None, "Google quá tải quá lâu. Vui lòng thử lại vào ngày mai."
                 else:
                     return None, str(e)
                     
     except Exception as e:
         return None, str(e)
 
-# --- GIAO DIỆN NGƯỜI DÙNG (ĐÃ SỬA TEXT TIẾNG VIỆT) ---
+# --- GIAO DIỆN NGƯỜI DÙNG ---
 with st.sidebar:
     # 1. LOGO
     if os.path.exists("logo.jpg"):
@@ -126,7 +128,7 @@ with st.sidebar:
     st.caption("✅ Auto-Retry enabled.")
     st.markdown("---")
     
-    # 2. QR CODE & CREDITS MỚI
+    # 2. QR CODE & CREDITS
     st.markdown("<h4 style='text-align: center;'>Tham gia cộng đồng</h4>", unsafe_allow_html=True)
     if os.path.exists("qr.jpg"):
         st.image("qr.jpg", use_container_width=True)
@@ -160,6 +162,9 @@ if uploaded_files:
             st.success(f"✅ Đã kết nối: {active_model}")
             progress_bar = st.progress(0)
             
+            # Danh sách để nén ZIP
+            success_files = []
+            
             for i, uploaded_file in enumerate(uploaded_files):
                 with st.container():
                     status_box = st.empty()
@@ -171,6 +176,11 @@ if uploaded_files:
                     else:
                         status_box.empty()
                         
+                        # Lưu file vào bộ nhớ đệm
+                        uploaded_file.seek(0)
+                        file_data = uploaded_file.read()
+                        success_files.append((new_name, file_data))
+                        
                         col_info, col_dl = st.columns([3, 1])
                         with col_info:
                             st.markdown(f"""
@@ -181,11 +191,10 @@ if uploaded_files:
                             """, unsafe_allow_html=True)
                         with col_dl:
                             st.write("")
-                            st.write("")
-                            uploaded_file.seek(0)
+                            # Nút tải lẻ
                             st.download_button(
-                                label="⬇️ TẢI VỀ",
-                                data=uploaded_file,
+                                label="⬇️ Tải lẻ",
+                                data=file_data,
                                 file_name=new_name,
                                 mime='application/pdf',
                                 key=f"dl_{i}",
@@ -193,5 +202,21 @@ if uploaded_files:
                             )
                 progress_bar.progress((i + 1) / len(uploaded_files))
             
-            st.balloons()
-            st.success("🎉 Hoàn tất!")
+            # --- TẠO NÚT TẢI ZIP ---
+            if success_files:
+                st.markdown("---")
+                st.success("🎉 Xử lý xong! Bấm nút dưới để tải tất cả mà KHÔNG bị reload trang.")
+                
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w") as zf:
+                    for name, data in success_files:
+                        zf.writestr(name, data)
+                
+                st.download_button(
+                    label="📦 TẢI VỀ TẤT CẢ (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name="Ho_so_da_doi_ten.zip",
+                    mime="application/zip",
+                    type="primary",
+                    use_container_width=True
+                )
